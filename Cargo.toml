@@ -1,0 +1,9 @@
+[package]
+name = "pwo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pest = "2.8.5"
+pest_derive = "2.8.5"
+thiserror = "2.0.17"
