@@ -1,19 +1,24 @@
-// Typy operatorów matematycznych
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
-    Add, // +
-    Sub, // -
-    Mul, // *
-    Div, // /
+    Add, Sub, Mul, Div, Pow
 }
 
-// Drzewo Składniowe (Abstract Syntax Tree)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    // Zwykła liczba, np. 3.14
     Number(f64),
-    // Operacja dwuargumentowa: lewa strona, operator, prawa strona
+    Variable(String),
+    ListGet(String, Box<Expr>),
     Binary(Box<Expr>, Op, Box<Expr>),
-    // Operacja jednoargumentowa, np. minus przed liczbą: -5
-    Unary(Box<Expr>), 
+    Unary(Box<Expr>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stmt {
+    Assignment(String, Expr),
+    ListAssignment(String, Expr, Expr),
+    Block(Vec<Stmt>),
+    If { cond: Expr, then_body: Box<Stmt>, else_body: Option<Box<Stmt>> },
+    For { var: String, start: Expr, end: Expr, down: bool, body: Box<Stmt> },
+    Return(Expr),
+    Expr(Expr),
 }

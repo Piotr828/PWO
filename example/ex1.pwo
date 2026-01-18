@@ -1,0 +1,14 @@
+S := 1
+d := 1
+b := 1
+a := 1
+c := 1
+
+// komentarz
+
+S:=d+1;
+S:=c/S;
+S:=b+S;
+S:=a/S;
+S:=1/S;
+Return(S)
