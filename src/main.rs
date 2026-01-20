@@ -3,57 +3,64 @@ mod lexer;
 mod parser;
 mod interp;
 
+use std::io::{self, Write};
 use std::env;
 use std::fs;
-use std::io::{self, Write};
+
+// Stałe kolory ANSI (ponieważ używasz ich bezpośrednio)
+const GREEN: &str = "\x1b[32m";
+const RED: &str = "\x1b[31m";
+const BLUE: &str = "\x1b[34m";
+const BOLD: &str = "\x1b[1m";
+const RESET: &str = "\x1b[0m";
+
+fn execute(source: &str, interpreter: &mut interp::Interpreter) -> Result<interp::Value, String> {
+    let tokens = lexer::tokenize(source)?;
+    let ast = parser::parse(tokens)?;
+    interpreter.interpret(ast)
+}
 
 fn main() {
+    // Wymuszenie kolorów na Windows (wymaga crate 'colored' w Cargo.toml)
+    #[cfg(windows)]
+    let _ = colored::control::set_virtual_terminal(true);
+
     let args: Vec<String> = env::args().collect();
-    
-    // Tworzymy instancję interpretera (zawiera w sobie środowisko zmiennych)
     let mut interpreter = interp::Interpreter::new();
 
     if args.len() > 1 {
+        // --- TRYB PLIKU ---
         let filename = &args[1];
-        run_file(filename, &mut interpreter);
+        match fs::read_to_string(filename) {
+            Ok(content) => {
+                match execute(&content, &mut interpreter) {
+                    // Wyświetlamy wynik tylko jeśli jest, formatujemy go funkcją z interp
+                    Ok(result) => println!("{}>> {}{}", GREEN, interp::format_value(result), RESET),
+                    Err(e) => eprintln!("{}Runtime Error: {}{}", RED, e, RESET),
+                }
+            }
+            Err(e) => eprintln!("{}Błąd odczytu pliku '{}': {}{}", RED, filename, e, RESET),
+        }
     } else {
-        run_repl(&mut interpreter);
-    }
-}
-
-fn run_file(path: &str, interpreter: &mut interp::Interpreter) {
-    let source = fs::read_to_string(path).expect("Nie można otworzyć pliku");
-    match execute(&source, interpreter) {
-        Ok(res) => println!("Program zakończony wynikiem: {}", interp::format_dual(res)),
-        Err(e) => eprintln!("Runtime Error: {}", e),
-    }
-}
-
-fn run_repl(interpreter: &mut interp::Interpreter) {
-    println!("Interpreter PWO v1.0 (wpisz 'exit' by wyjść)");
-    println!("Legenda: Czerwone cyfry oznaczają błąd precyzji binarnej.");
-
-    loop {
-        print!("> ");
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() || input.trim() == "exit" {
-            break;
-        }
-        if input.trim().is_empty() { continue; }
+        // --- TRYB INTERAKTYWNY (REPL) ---
+        println!("{}Interpreter v0.7 (Functions & Loops) - Tryb REPL{}", BOLD, RESET);
+        println!("Wpisz 'exit', aby wyjść.");
         
-        match execute(&input, interpreter) {
-            Ok(res) => println!("Wynik: {}", interp::format_dual(res)),
-            Err(e) => println!("{}", e),
+        loop {
+            print!("{}> {}", BLUE, RESET);
+            io::stdout().flush().unwrap();
+
+            let mut input = String::new();
+            if io::stdin().read_line(&mut input).is_err() { break; }
+            let input = input.trim();
+            
+            if input.eq_ignore_ascii_case("exit") { break; }
+            if input.is_empty() { continue; }
+
+            match execute(input, &mut interpreter) {
+                Ok(result) => println!("{}>> {}{}", GREEN, interp::format_value(result), RESET),
+                Err(e) => println!("{}Error: {}{}", RED, e, RESET),
+            }
         }
     }
-}
-
-fn execute(source: &str, interpreter: &mut interp::Interpreter) -> Result<interp::DualValue, String> {
-    let tokens = lexer::tokenize(source)?;
-    let ast = parser::parse(tokens)?;
-    
-    // Wywołujemy metodę na obiekcie interpreter
-    interpreter.interpret(ast)
 }

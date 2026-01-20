@@ -1,8 +1,4 @@
 # TODO
-
-* Funkcje (w ogólności, w tym lambda)
-* Operatory i stałe logiczne
-* Modulo
-* instrukcja include i include_once
+* Rzutowanie (arbitralna precyzja bitowa np. Return( (f12) ) to float do 12 bitów, niewspierany natywnie ale tutaj dopuszczalny. Podobnie i32 albo u12 ))
 * Wtyczka
 * Funkcje wbudowane + ograniczenia

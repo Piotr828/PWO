@@ -1,30 +1,35 @@
-// Zmieniona linijka: tylko Debug, Clone, PartialEq
-#[derive(Debug, Clone, PartialEq)] 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Number(f64),
     Ident(String),
     
-    // Operatory
-    Plus, Minus, Star, Slash, Caret, // ^
-    Assign, Eq, // :=, =
+    Plus, Minus, Star, Slash, Mod, Caret,
+    And, Or, Not,
+    Eq, Neq,
+    Lt, Gt, Lte, Gte,
     
-    // Nawiasy
-    LParen, RParen, LBracket, RBracket, // ( ) [ ]
+    Arrow,
+    Pipe,
+    Comma,
+
+    Assign,
+    LParen, RParen, LBracket, RBracket,
     Semi,
     
     // Słowa kluczowe
-    If, Then, Else,
+    If, Then, Else, Fi,
+    True, False,
     For, From, To, Downto, Do, Od, End,
+    While,
+    Fn,
+    Include, IncludeOnce,
     Return,
     
     Eof,
 }
 
-// 1. Ręczna implementacja Eq (wymagana przez Hash)
-// Oszukujemy Rusta, obiecując, że nie będziemy używać NaN w kluczach mapy
 impl Eq for Token {}
 
-// 2. Ręczna implementacja Hash (bez zmian logicznych, ale teraz jest jedyna)
 impl std::hash::Hash for Token {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
@@ -37,8 +42,6 @@ impl std::hash::Hash for Token {
 }
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
-    // ... reszta funkcji tokenize BEZ ZMIAN ...
-    // (Wklej tutaj ciało funkcji tokenize z poprzedniej odpowiedzi)
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
 
@@ -51,7 +54,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                         num_str.push(ch); chars.next();
                     } else { break; }
                 }
-                let n = num_str.parse::<f64>().map_err(|_| format!("Błąd liczby: {}", num_str))?;
+                let n = num_str.parse::<f64>().map_err(|_| format!("Nieznana liczba: {}", num_str))?;
                 tokens.push(Token::Number(n));
             }
             'a'..='z' | 'A'..='Z' | '_' => {
@@ -62,10 +65,16 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     } else { break; }
                 }
                 let token = match ident.as_str() {
-                    "if" => Token::If, "then" => Token::Then, "else" => Token::Else,
+                    "if" => Token::If, "then" => Token::Then, "else" => Token::Else, "fi" => Token::Fi,
+                    "True" => Token::True, "False" => Token::False,
                     "for" => Token::For, "from" => Token::From, "to" => Token::To,
                     "downto" => Token::Downto, "do" => Token::Do, "od" => Token::Od,
-                    "end" => Token::End, "Return" => Token::Return,
+                    "while" => Token::While, // <--- NOWOŚĆ
+                    "end" => Token::End, 
+                    "Return" | "return" => Token::Return,
+                    "fn" => Token::Fn, // <--- NOWOŚĆ
+                    "include" => Token::Include, // <--- NOWOŚĆ
+                    "include_once" => Token::IncludeOnce, // <--- NOWOŚĆ
                     _ => Token::Ident(ident),
                 };
                 tokens.push(token);
@@ -73,17 +82,77 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             ':' => {
                 chars.next();
                 if let Some('=') = chars.peek() { chars.next(); tokens.push(Token::Assign); }
-                else { return Err("Błąd składni: Oczekiwano '=' po ':'".into()); }
+                else { return Err("Błąd składni: Oczekiwano ':=' ".into()); }
             }
+            '=' => { tokens.push(Token::Eq); chars.next(); }
+            '&' => {
+                chars.next();
+                if let Some('&') = chars.peek() { chars.next(); tokens.push(Token::And); }
+                else { return Err("Błąd: Spróbuj && zamiast &".into()); }
+            }
+            '|' => {
+                chars.next();
+                if let Some('|') = chars.peek() { 
+                    chars.next(); 
+                    tokens.push(Token::Or); 
+                } else { 
+                    tokens.push(Token::Pipe); 
+                }
+            }
+            '!' => { 
+                chars.next();
+                if let Some('=') = chars.peek() { chars.next(); tokens.push(Token::Neq); }
+                else { tokens.push(Token::Not); }
+            }
+            '<' => {
+                chars.next();
+                if let Some('=') = chars.peek() { chars.next(); tokens.push(Token::Lte); }
+                else { tokens.push(Token::Lt); }
+            }
+            '>' => {
+                chars.next();
+                if let Some('=') = chars.peek() { chars.next(); tokens.push(Token::Gte); }
+                else { tokens.push(Token::Gt); }
+            }
+            '/' => { 
+                chars.next();
+                match chars.peek() {
+                    Some('/') => {
+                        while let Some(&ch) = chars.peek() {
+                            if ch != '\n' { chars.next(); } else { break; }
+                        }
+                    },
+                    Some('*') => {
+                        chars.next();
+                        while let Some(ch) = chars.next() {
+                            if ch == '*' {
+                                if let Some('/') = chars.peek() {
+                                    chars.next();
+                                    break;
+                                }
+                            }
+                        }
+                    },
+                    _ => tokens.push(Token::Slash),
+                }
+            }
+            '-' => { 
+                chars.next();
+                if let Some('>') = chars.peek() {
+                    chars.next();
+                    tokens.push(Token::Arrow);
+                } else {
+                    tokens.push(Token::Minus);
+                }
+            }
+            ',' => { tokens.push(Token::Comma); chars.next(); }
+            '%' => { tokens.push(Token::Mod); chars.next(); }
             '^' => { tokens.push(Token::Caret); chars.next(); }
             '[' => { tokens.push(Token::LBracket); chars.next(); }
             ']' => { tokens.push(Token::RBracket); chars.next(); }
-            '=' => { tokens.push(Token::Eq); chars.next(); }
             ';' => { tokens.push(Token::Semi); chars.next(); }
             '+' => { tokens.push(Token::Plus); chars.next(); }
-            '-' => { tokens.push(Token::Minus); chars.next(); }
             '*' => { tokens.push(Token::Star); chars.next(); }
-            '/' => { tokens.push(Token::Slash); chars.next(); }
             '(' => { tokens.push(Token::LParen); chars.next(); }
             ')' => { tokens.push(Token::RParen); chars.next(); }
             c if c.is_whitespace() => { chars.next(); }
