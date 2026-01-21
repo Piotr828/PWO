@@ -6,13 +6,7 @@ mod interp;
 use std::io::{self, Write};
 use std::env;
 use std::fs;
-
-// Stałe kolory ANSI (ponieważ używasz ich bezpośrednio)
-const GREEN: &str = "\x1b[32m";
-const RED: &str = "\x1b[31m";
-const BLUE: &str = "\x1b[34m";
-const BOLD: &str = "\x1b[1m";
-const RESET: &str = "\x1b[0m";
+use colored::*; // Używamy biblioteki colored dla spójności z interp.rs
 
 fn execute(source: &str, interpreter: &mut interp::Interpreter) -> Result<interp::Value, String> {
     let tokens = lexer::tokenize(source)?;
@@ -21,7 +15,7 @@ fn execute(source: &str, interpreter: &mut interp::Interpreter) -> Result<interp
 }
 
 fn main() {
-    // Wymuszenie kolorów na Windows (wymaga crate 'colored' w Cargo.toml)
+    // Wymuszenie kolorów na Windows
     #[cfg(windows)]
     let _ = colored::control::set_virtual_terminal(true);
 
@@ -34,20 +28,23 @@ fn main() {
         match fs::read_to_string(filename) {
             Ok(content) => {
                 match execute(&content, &mut interpreter) {
-                    // Wyświetlamy wynik tylko jeśli jest, formatujemy go funkcją z interp
-                    Ok(result) => println!("{}>> {}{}", GREEN, interp::format_value(result), RESET),
-                    Err(e) => eprintln!("{}Runtime Error: {}{}", RED, e, RESET),
+                    Ok(result) => {
+                        // Nie narzucamy koloru na 'result', bo format_value sam decyduje (np. czerwony błąd)
+                        println!("{} {}", ">>".green(), interp::format_value(result));
+                    },
+                    Err(e) => eprintln!("{} {}", "Runtime Error:".red().bold(), e),
                 }
             }
-            Err(e) => eprintln!("{}Błąd odczytu pliku '{}': {}{}", RED, filename, e, RESET),
+            Err(e) => eprintln!("{} '{}': {}", "Błąd odczytu pliku".red(), filename, e),
         }
     } else {
         // --- TRYB INTERAKTYWNY (REPL) ---
-        println!("{}Interpreter v0.7 (Functions & Loops) - Tryb REPL{}", BOLD, RESET);
+        println!("{} v0.8 (Lists, Recursion & Casting)", "Interpreter".bold());
         println!("Wpisz 'exit', aby wyjść.");
         
         loop {
-            print!("{}> {}", BLUE, RESET);
+            // Znak zachęty
+            print!("{} ", ">".blue().bold());
             io::stdout().flush().unwrap();
 
             let mut input = String::new();
@@ -58,8 +55,12 @@ fn main() {
             if input.is_empty() { continue; }
 
             match execute(input, &mut interpreter) {
-                Ok(result) => println!("{}>> {}{}", GREEN, interp::format_value(result), RESET),
-                Err(e) => println!("{}Error: {}{}", RED, e, RESET),
+                Ok(result) => {
+                    // Wyświetlamy ">>" na zielono, a wynik w jego własnym kolorze
+                    // (dzięki temu błędy precyzji w liczbach będą czerwone)
+                    println!("{} {}", ">>".green(), interp::format_value(result));
+                },
+                Err(e) => println!("{} {}", "Error:".red(), e),
             }
         }
     }

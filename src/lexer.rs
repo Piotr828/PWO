@@ -15,8 +15,9 @@ pub enum Token {
     Assign,
     LParen, RParen, LBracket, RBracket,
     Semi,
+    Cast(char, u32, bool), 
     
-    // Słowa kluczowe
+   
     If, Then, Else, Fi,
     True, False,
     For, From, To, Downto, Do, Od, End,
@@ -36,6 +37,11 @@ impl std::hash::Hash for Token {
         match self {
             Token::Number(f) => f.to_bits().hash(state),
             Token::Ident(s) => s.hash(state),
+            Token::Cast(c, s, b) => {
+                c.hash(state);
+                s.hash(state);
+                b.hash(state);
+            }
             _ => {}
         }
     }
@@ -69,12 +75,12 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     "True" => Token::True, "False" => Token::False,
                     "for" => Token::For, "from" => Token::From, "to" => Token::To,
                     "downto" => Token::Downto, "do" => Token::Do, "od" => Token::Od,
-                    "while" => Token::While, // <--- NOWOŚĆ
+                    "while" => Token::While,
                     "end" => Token::End, 
                     "Return" | "return" => Token::Return,
-                    "fn" => Token::Fn, // <--- NOWOŚĆ
-                    "include" => Token::Include, // <--- NOWOŚĆ
-                    "include_once" => Token::IncludeOnce, // <--- NOWOŚĆ
+                    "fn" => Token::Fn,
+                    "include" => Token::Include,
+                    "include_once" => Token::IncludeOnce,
                     _ => Token::Ident(ident),
                 };
                 tokens.push(token);
@@ -145,6 +151,49 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     tokens.push(Token::Minus);
                 }
             }
+           
+            '(' => { 
+               
+                let mut lookahead = chars.clone();
+                lookahead.next();
+                
+                let mut is_cast = false;
+                
+               
+                if let Some(type_char @ ('i' | 'u' | 'f')) = lookahead.next() {
+                    let mut num_str = String::new();
+                   
+                    while let Some(&d) = lookahead.peek() {
+                        if d.is_ascii_digit() {
+                            num_str.push(d);
+                            lookahead.next();
+                        } else { break; }
+                    }
+                    
+                    if !num_str.is_empty() {
+                       
+                        let is_decimal = if let Some('d') = lookahead.peek() {
+                            lookahead.next(); true
+                        } else { false };
+                        
+                       
+                        if let Some(')') = lookahead.peek() {
+                            lookahead.next();
+                            chars = lookahead; 
+                            
+                            let size = num_str.parse::<u32>().unwrap_or(0);
+                            tokens.push(Token::Cast(type_char, size, is_decimal));
+                            is_cast = true;
+                        }
+                    }
+                }
+                
+                if !is_cast {
+                   
+                    tokens.push(Token::LParen); 
+                    chars.next();
+                }
+            }
             ',' => { tokens.push(Token::Comma); chars.next(); }
             '%' => { tokens.push(Token::Mod); chars.next(); }
             '^' => { tokens.push(Token::Caret); chars.next(); }
@@ -153,7 +202,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
             ';' => { tokens.push(Token::Semi); chars.next(); }
             '+' => { tokens.push(Token::Plus); chars.next(); }
             '*' => { tokens.push(Token::Star); chars.next(); }
-            '(' => { tokens.push(Token::LParen); chars.next(); }
             ')' => { tokens.push(Token::RParen); chars.next(); }
             c if c.is_whitespace() => { chars.next(); }
             _ => return Err(format!("Nieznany znak: {}", c)),

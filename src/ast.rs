@@ -1,11 +1,31 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
-    // Arytmetyka
+    
     Add, Sub, Mul, Div, Mod, Pow,
-    // Logika
+    
     And, Or, Not,
-    // Porównania
+    
     Eq, Neq, Lt, Gt, Lte, Gte, 
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CastType {
+    Int,    
+    Uint,   
+    Float,  
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CastMode {
+    Bits,       
+    Decimal,    
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CastSpec {
+    pub cast_type: CastType,
+    pub size: u32,       
+    pub mode: CastMode,  
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -17,6 +37,11 @@ pub enum Expr {
     Unary(Op, Box<Expr>),
     ListGet(String, Box<Expr>),
     
+
+    Cast(CastSpec, Box<Expr>),
+
+    ListLiteral(Vec<Expr>), 
+
     Call(Box<Expr>, Vec<Expr>), 
     Lambda(Vec<String>, Box<Stmt>), 
 }
@@ -44,7 +69,6 @@ pub enum Stmt {
         body: Box<Stmt>,
     },
     
-
     Function(String, Vec<String>, Box<Stmt>),
 
     Include(String),

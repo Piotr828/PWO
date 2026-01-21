@@ -1,0 +1,11 @@
+x := 1.0000001
+y := 1.0
+sum := 0.0
+
+for i from 1 to 10 do
+    x := x * 1.00001
+    y := y * 1.00001
+end
+
+wynik := x - y
+Return(wynik)

@@ -173,6 +173,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "control"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "026fee9fd78cbb918c2dc7f88eee52b14e09c0bdcbc19ea7cbf009419db81746"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -440,7 +449,7 @@ version = "0.1.0"
 dependencies = [
  "chumsky",
  "colored",
- "pest",
+ "control",
  "pest_derive",
  "rust_decimal",
  "rust_decimal_macros",

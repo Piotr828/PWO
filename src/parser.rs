@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Op, Stmt};
+use crate::ast::{Expr, Op, Stmt, CastSpec, CastType, CastMode};
 use crate::lexer::Token;
 use chumsky::prelude::*;
 
@@ -34,8 +34,17 @@ fn expr_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Expr, ParserExtra
             .then(expr.clone())
             .map(|(args, body_expr)| Expr::Lambda(args, Box::new(Stmt::Return(body_expr))));
 
+        // --- NOWOŚĆ: Parsowanie literałów list [a, b, c] ---
+        let list_literal = expr.clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .map(Expr::ListLiteral);
+
         let atom_base = choice((
             lambda,
+            list_literal, // Dodajemy listę do bazy atomów
             val,
             expr.clone().delimited_by(just(Token::LParen), just(Token::RParen)),
             ident.clone()
@@ -54,13 +63,38 @@ fn expr_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Expr, ParserExtra
             |callee, args| Expr::Call(Box::new(callee), args)
         );
 
-        let unary = choice((
+        // --- NOWOŚĆ: Parsowanie rzutowania (i32) atom ---
+        // Token::Cast jest generowany przez lexer, gdy napotka np. (i32)
+        let cast = select! {
+            Token::Cast(c, s, d) => (c, s, d)
+        }
+        .then(atom.clone())
+        .map(|((type_char, size, is_dec), val)| {
+            let cast_type = match type_char {
+                'i' => CastType::Int,
+                'u' => CastType::Uint,
+                'f' => CastType::Float,
+                _ => CastType::Int,
+            };
+            let mode = if is_dec { CastMode::Decimal } else { CastMode::Bits };
+            Expr::Cast(CastSpec { cast_type, size, mode }, Box::new(val))
+        });
+
+        // Standardowe operatory unarne: -x, !x
+        let standard_unary = choice((
             just(Token::Minus).to(Op::Sub),
             just(Token::Not).to(Op::Not),
         ))
         .then(atom.clone())
-        .map(|(op, val)| Expr::Unary(op, Box::new(val)))
-        .or(atom);
+        .map(|(op, val)| Expr::Unary(op, Box::new(val)));
+
+        // Unary łączy rzutowanie, operatory i atomy
+        // Kolejność choice ma znaczenie (najpierw specyficzne, potem ogólne)
+        let unary = choice((
+            cast,
+            standard_unary,
+            atom
+        ));
 
         let power = unary.clone().then(just(Token::Caret).to(Op::Pow).then(unary).repeated().collect::<Vec<_>>())
             .map(|(first, rest)| rest.into_iter().fold(first, |l, (op, r)| Expr::Binary(Box::new(l), op, Box::new(r))));
@@ -87,7 +121,7 @@ fn expr_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Expr, ParserExtra
         let logical_or = logical_and.clone().then(just(Token::Or).to(Op::Or).then(logical_and).repeated().collect::<Vec<_>>())
             .map(|(first, rest)| rest.into_iter().fold(first, |l, (op, r)| Expr::Binary(Box::new(l), op, Box::new(r))));
 
-        logical_or
+        logical_or.boxed() // .boxed() pomaga kompilatorowi przy rekurencji
     })
 }
 
@@ -104,7 +138,6 @@ fn stmt_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Stmt, ParserExtra
             .ignore_then(expr.clone().delimited_by(just(Token::LParen), just(Token::RParen)))
             .map(Stmt::Return);
 
-        // --- POPRAWKA: Przypisania używają backtracking'u ---
         let list_assignment = ident.clone()
             .then(expr.clone().delimited_by(just(Token::LBracket), just(Token::RBracket)))
             .then_ignore(just(Token::Assign))
@@ -163,20 +196,18 @@ fn stmt_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Stmt, ParserExtra
             .then_ignore(just(Token::End))
             .map(|((name, args), body)| Stmt::Function(name, args, Box::new(body)));
 
-        // Kolejność w choice jest kluczowa. Chumsky spróbuje dopasować po kolei.
         choice((
             include, include_once,
             function_def,
-            // Próba przypisania do listy. Jeśli nie ma ":=", zawiedzie i przejdzie dalej.
             list_assignment, 
             assignment, 
             ret, 
             while_stmt, 
             for_variant_a, for_variant_b, 
             if_stmt, 
-            // Na samym końcu sprawdzamy zwykłe wyrażenie (np. tablica[3])
             expr.map(Stmt::Expr)
         ))
         .then_ignore(just(Token::Semi).or_not())
+        .boxed() // .boxed() na końcu parsera instrukcji
     })
 }
