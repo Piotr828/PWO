@@ -4,12 +4,16 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use crate::ast::{Expr, Op, Stmt, CastSpec, CastType, CastMode};
 use colored::*;
-use rust_decimal::prelude::*;
-use rust_decimal_macros::dec;
+use bigdecimal::{BigDecimal, FromPrimitive, ToPrimitive, Zero, One};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+// --- KONFIGURACJA ---
+const MAX_PRECISION: i64 = 300; 
+
+// --- STRUKTURY DANYCH ---
+
+#[derive(Debug, Clone, PartialEq)] 
 pub struct DualValue {
-    pub precise: Decimal,
+    pub precise: BigDecimal,
     pub binary: f64,
 }
 
@@ -51,7 +55,7 @@ impl Environment {
 impl Value {
     pub fn deep_clone(&self) -> Self {
         match self {
-            Value::Number(n) => Value::Number(*n),
+            Value::Number(n) => Value::Number(n.clone()),
             Value::Bool(b) => Value::Bool(*b),
             Value::List(l) => {
                 let cloned_vec = l.borrow().iter().map(|v| v.deep_clone()).collect();
@@ -76,7 +80,7 @@ impl Interpreter {
     }
 
     pub fn interpret(&mut self, program: Vec<Stmt>) -> Result<Value, String> {
-        let mut last_result = Value::Number(DualValue { precise: dec!(0), binary: 0.0 });
+        let mut last_result = Value::Number(DualValue { precise: BigDecimal::zero(), binary: 0.0 });
         for stmt in program {
             if let Some(val) = eval_stmt(&stmt, &self.global_env, &mut self.included_files)? {
                 last_result = val;
@@ -86,6 +90,7 @@ impl Interpreter {
     }
 }
 
+// --- FORMATOWANIE I KOLOROWANIE ---
 
 pub fn format_value(val: Value) -> String {
     match val {
@@ -100,60 +105,70 @@ pub fn format_value(val: Value) -> String {
 }
 
 pub fn format_dual(val: DualValue) -> String {
+    // Obsługa wartości specjalnych
     if val.binary.is_infinite() {
         let text = if val.binary.is_sign_positive() { "inf" } else { "-inf" };
         return text.red().to_string();
     }
     if val.binary.is_nan() { return "NaN".red().to_string(); }
 
-    
+    // 1. Przygotowanie stringów
     let p_str = val.precise.to_string();
     
-    
-    
+    // Standardowe formatowanie f64.
     let b_str = format!("{:.20}", val.binary)
         .trim_end_matches('0')
         .trim_end_matches('.')
         .to_string();
-    
-    let get_int_part = |s: &str| s.split('.').next().unwrap_or("").to_string();
-    
+
+    // 2. FUNDAMENTALNY BŁĄD CAŁKOWITY (Overflow / Underflow)
+    // POPRAWKA: Dodano .to_string() na końcu, aby zwrócić 'String' a nie '&str'
+    let get_int_part = |s: &str| s.split('.').next().unwrap_or("0").to_string();
     
     if get_int_part(&p_str) != get_int_part(&b_str) {
         return b_str.red().to_string();
     }
 
+    // 3. ANALIZA PO PRZECINKU
     let mut result = String::new();
     let p_chars: Vec<char> = p_str.chars().collect();
     let b_chars: Vec<char> = b_str.chars().collect();
     let mut divergence = false;
 
-    
+    // Iterujemy po stringu BINARNYM (tym, który wyświetlamy)
     for (i, &c_bin) in b_chars.iter().enumerate() {
         if divergence {
-            
+            // Jeśli błąd już wystąpił, wszystko dalej na czerwono
             result.push_str(&c_bin.to_string().red().to_string());
         } else {
-            
-            if i < p_chars.len() {
-                if c_bin == p_chars[i] {
-                    result.push(c_bin); 
-                } else {
-                    divergence = true; 
+            // Pobieramy odpowiadającą cyfrę z Precise
+            let c_prec = if i < p_chars.len() { Some(p_chars[i]) } else { None };
+
+            match c_prec {
+                Some(p) if p == c_bin => {
+                    // ZGODNOŚĆ
+                    
+                    // Sprawdzamy "Zasadę Pomarańczowego Końca"
+                    if i == b_chars.len() - 1 && p_chars.len() > b_chars.len() {
+                        result.push_str(&c_bin.to_string().truecolor(255, 165, 0).to_string());
+                    } else {
+                        // Pełna zgodność -> Biały
+                        result.push(c_bin);
+                    }
+                },
+                _ => {
+                    // BRAK ZGODNOŚCI
+                    divergence = true;
                     result.push_str(&c_bin.to_string().red().to_string());
                 }
-            } else {
-                
-                divergence = true;
-                result.push_str(&c_bin.to_string().red().to_string());
             }
         }
     }
-
+    
     result
 }
 
-
+// --- LOGIKA WYKONAWCZA (STMT) ---
 
 fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<Option<Value>, String> {
     match stmt {
@@ -168,7 +183,6 @@ fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<Option
             Ok(Some(val))
         }
 
-        
         Stmt::ListAssignment(name, idx_expr, val_expr) => {
             let list_val = env.borrow().get(name).ok_or(format!("Zmienna '{}' nie istnieje", name))?;
             
@@ -177,21 +191,17 @@ fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<Option
                 let val = eval_expr(val_expr, env, inc)?;
                 
                 let mut vec = vec_rc.borrow_mut();
-                if idx < 0 {
-                    return Err(format!("Indeks {} nie może być ujemny", idx));
-                }
-                
+                if idx < 0 { return Err(format!("Indeks {} nie może być ujemny", idx)); }
                 
                 if idx as usize >= vec.len() {
                     let new_len = idx as usize + 1;
-                    vec.resize(new_len, Value::Number(DualValue { precise: dec!(0), binary: 0.0 }));
+                    vec.resize(new_len, Value::Number(DualValue { precise: BigDecimal::zero(), binary: 0.0 }));
                 }
                 
-                let val_clone = val.deep_clone();
-                vec[idx as usize] = val_clone.clone();
-                Ok(Some(val_clone))
+                vec[idx as usize] = val.deep_clone();
+                Ok(Some(val.deep_clone()))
             } else {
-                return Err(format!("'{}' nie jest listą", name));
+                Err(format!("'{}' nie jest listą", name))
             }
         }
 
@@ -230,13 +240,13 @@ fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<Option
             let s_val = get_number_dv(eval_expr(start, env, inc)?)?;
             let e_val = get_number_dv(eval_expr(end, env, inc)?)?;
             
-            env.borrow_mut().vars.insert(var.clone(), Value::Number(s_val));
+            env.borrow_mut().vars.insert(var.clone(), Value::Number(s_val.clone()));
             let mut last = None;
             
             loop {
                 let curr_val = match env.borrow().get(var) {
                     Some(Value::Number(dv)) => dv,
-                    _ => DualValue { precise: dec!(0), binary: 0.0 },
+                    _ => DualValue { precise: BigDecimal::zero(), binary: 0.0 },
                 };
 
                 if *down { if curr_val.binary < e_val.binary { break; } } 
@@ -245,8 +255,7 @@ fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<Option
                 let res = eval_stmt(body, env, inc)?;
                 if res.is_some() { last = res; }
 
-                let one_dec = Decimal::new(1, 0);
-                let next_p = if *down { curr_val.precise - one_dec } else { curr_val.precise + one_dec };
+                let next_p = if *down { &curr_val.precise - BigDecimal::one() } else { &curr_val.precise + BigDecimal::one() };
                 let next_b = if *down { curr_val.binary - 1.0 } else { curr_val.binary + 1.0 };
                 
                 env.borrow_mut().vars.insert(var.clone(), Value::Number(DualValue { precise: next_p, binary: next_b }));
@@ -278,11 +287,13 @@ fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<Option
     }
 }
 
+// --- LOGIKA WYRAŻEŃ (EXPR) ---
+
 fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value, String> {
     match expr {
         Expr::Number(n) => {
-            let dec_val = Decimal::from_f64(*n).unwrap_or(dec!(0));
-            Ok(Value::Number(DualValue { precise: dec_val, binary: *n }))
+            let big_dec = BigDecimal::from_f64(*n).ok_or("Błąd konwersji f64->BigDecimal")?;
+            Ok(Value::Number(DualValue { precise: big_dec, binary: *n }))
         },
         Expr::Bool(b) => Ok(Value::Bool(*b)),
         
@@ -293,7 +304,6 @@ fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value,
         Expr::Cast(spec, inner_expr) => {
             let val = eval_expr(inner_expr, env, inc)?;
             let num = get_number_dv(val)?;
-            
             let new_num = apply_cast(num, spec)?;
             Ok(Value::Number(new_num))
         },
@@ -308,12 +318,15 @@ fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value,
 
         Expr::ListGet(name, idx_expr) => {
             let list_val = env.borrow().get(name).ok_or(format!("Zmienna '{}' nie istnieje", name))?;
+            
             if let Value::List(vec_rc) = list_val {
                 let idx = get_index(eval_expr(idx_expr, env, inc)?)?;
                 let vec = vec_rc.borrow();
+                
                 if idx < 0 || idx as usize >= vec.len() {
-                    return Err(format!("Indeks {} poza zakresem", idx));
+                    return Err(format!("Indeks {} poza zakresem (długość: {})", idx, vec.len()));
                 }
+                
                 Ok(vec[idx as usize].clone())
             } else {
                 Err(format!("'{}' nie jest listą", name))
@@ -329,7 +342,7 @@ fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value,
             
             let (param_names, body, closure_env) = match func_val {
                 Value::Function(p, b, e) => (p, b, e),
-                _ => return Err("Próba wywołania czegoś, co nie jest funkcją".into()),
+                _ => return Err("Próba wywołania wartości, która nie jest funkcją".into()),
             };
 
             if param_names.len() != args_exprs.len() {
@@ -350,7 +363,7 @@ fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value,
             if let Some(ret_val) = eval_stmt(&body, &func_env, inc)? {
                 Ok(ret_val)
             } else {
-                Ok(Value::Number(DualValue { precise: dec!(0), binary: 0.0 }))
+                Ok(Value::Number(DualValue { precise: BigDecimal::zero(), binary: 0.0 }))
             }
         },
 
@@ -377,22 +390,24 @@ fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value,
                 Op::Add | Op::Sub | Op::Mul | Op::Div | Op::Mod | Op::Pow => {
                     let l = get_number_dv(l_val)?;
                     let r = get_number_dv(r_val)?;
+                    
                     let (res_p, res_b) = match op {
-                        Op::Add => (l.precise + r.precise, l.binary + r.binary),
-                        Op::Sub => (l.precise - r.precise, l.binary - r.binary),
-                        Op::Mul => (l.precise * r.precise, l.binary * r.binary),
+                        Op::Add => (l.precise + &r.precise, l.binary + r.binary),
+                        Op::Sub => (l.precise - &r.precise, l.binary - r.binary),
+                        Op::Mul => (l.precise * &r.precise, l.binary * r.binary),
                         Op::Div => {
                             if r.binary == 0.0 { return Err("Dzielenie przez zero".into()); }
-                            let dec_res = if r.precise.is_zero() { dec!(0) } else { l.precise / r.precise };
-                            (dec_res, l.binary / r.binary)
+                            let p = l.precise.with_scale(MAX_PRECISION) / r.precise;
+                            (p, l.binary / r.binary)
                         },
                         Op::Mod => {
                             if r.binary == 0.0 { return Err("Modulo przez zero".into()); }
-                            (l.precise % r.precise, l.binary % r.binary)
+                            (l.precise % &r.precise, l.binary % r.binary)
                         },
                         Op::Pow => {
                             let rb = l.binary.powf(r.binary);
-                            (Decimal::from_f64(rb).unwrap_or(dec!(0)), rb)
+                            let pb = BigDecimal::from_f64(rb).unwrap_or(BigDecimal::zero());
+                            (pb, rb)
                         },
                         _ => unreachable!(),
                     };
@@ -417,72 +432,108 @@ fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value,
                         };
                         Ok(Value::Bool(res))
                     } else if let (Value::Bool(l), Value::Bool(r)) = (&l_val, &r_val) {
-                         let res = match op { Op::Eq => l == r, Op::Neq => l != r, _ => return Err("Błąd typów w porównaniu".into()) };
+                         let res = match op { Op::Eq => l == r, Op::Neq => l != r, _ => return Err("Błąd typów w porównaniu bool".into()) };
                          Ok(Value::Bool(res))
                     } else {
-                        Err("Niezgodne typy w porównaniu".into())
+                        Err(format!("Niezgodne typy w porównaniu: {:?} vs {:?}", l_val, r_val))
                     }
                 },
-                Op::Not => Err("Błąd składni: Operator '!' (Not) nie jest operatorem binarnym".into()),
+                Op::Not => Err("Operator '!' (Not) nie jest operatorem binarnym".into()),
             }
         }
     }
 }
 
-
+// --- LOGIKA RZUTOWANIA ---
 
 fn apply_cast(val: DualValue, spec: &CastSpec) -> Result<DualValue, String> {
-    let mut num = val.binary;
+    let mut num_bin = val.binary;
+    let mut num_prec = val.precise; // Kopia wzorca
 
     match spec.mode {
+        // --- TRYB DZIESIĘTNY (Matematyczne Zaokrąglanie) ---
+        // Tutaj zmieniamy OBA pola, bo intencją jest zmiana wartości (np. waluta)
         CastMode::Decimal => {
-            let factor = 10f64.powi(spec.size as i32);
-            num = (num * factor).round() / factor;
+            match spec.cast_type {
+                CastType::Float => {
+                    // (fNd) -> round(x, N)
+                    let dp = spec.size as i64;
+                    num_prec = num_prec.with_scale(dp); // Aktualizujemy precise!
+                    num_bin = num_prec.to_f64().unwrap_or(num_bin);
+                },
+                CastType::Int | CastType::Uint => {
+                    // (uNd) -> x % 10^N
+                    let mut range = BigDecimal::one();
+                    let ten = BigDecimal::from(10);
+                    for _ in 0..spec.size { range = &range * &ten; }
+                    
+                    num_prec = num_prec.with_scale(0); 
+                    num_prec = num_prec % range.clone(); // Aktualizujemy precise!
+
+                    if spec.cast_type == CastType::Uint && num_prec < BigDecimal::zero() {
+                        num_prec = num_prec + range;
+                    }
+                    num_bin = num_prec.to_f64().unwrap_or(0.0);
+                }
+            }
         },
+
+        // --- TRYB BITOWY (Symulacja Sprzętu) ---
+        // Tutaj zmieniamy TYLKO binary. Precise zostawiamy bez zmian,
+        // aby móc porównać zepsutą wartość ze wzorcem.
         CastMode::Bits => {
             match spec.cast_type {
-                CastType::Int => {
-                    let bits = spec.size;
-                    let range = 2f64.powf(bits as f64);
-                    let half_range = range / 2.0;
-                    
-                    num = num % range;
-                    if num >= half_range {
-                        num -= range;
-                    } else if num < -half_range {
-                        num += range;
-                    }
-                    num = num.trunc();
-                },
-                CastType::Uint => {
-                    let range = 2f64.powf(spec.size as f64);
-                    num = num % range;
-                    if num < 0.0 { num += range; }
-                    num = num.trunc();
-                },
                 CastType::Float => {
                     match spec.size {
+                        64 => { /* Identity */ },
+                        32 => { num_bin = (num_bin as f32) as f64; },
                         16 => {
-                            let mut f_bits = (num as f32).to_bits();
+                            let mut f_bits = (num_bin as f32).to_bits();
                             f_bits &= 0xFFFFE000; 
-                            num = f32::from_bits(f_bits) as f64;
+                            num_bin = f32::from_bits(f_bits) as f64;
                         },
-                        32 => {
-                            num = (num as f32) as f64;
+                        8 => {
+                            let mut f_bits = (num_bin as f32).to_bits();
+                            f_bits &= 0xFFC00000; 
+                            num_bin = f32::from_bits(f_bits) as f64;
                         },
-                        64 => { },
-                        _ => return Err(format!("Dostępne floaty: f16, f32, f64")),
+                        _ => return Err(format!("Bits: f8, f16, f32, f64. Masz: f{}", spec.size)),
                     }
+                    // NIE AKTUALIZUJEMY num_prec!
+                },
+                CastType::Int | CastType::Uint => {
+                    let range_f = 2f64.powf(spec.size as f64);
+                    
+                    // Symulacja overflow na f64
+                    let mut temp_bin = num_bin.trunc();
+                    let range_mod = range_f;
+                    
+                    if spec.cast_type == CastType::Uint {
+                        temp_bin = temp_bin % range_mod;
+                        if temp_bin < 0.0 { temp_bin += range_mod; }
+                    } else {
+                        let half = range_mod / 2.0;
+                        temp_bin = temp_bin % range_mod;
+                        if temp_bin >= half { temp_bin -= range_mod; }
+                        else if temp_bin < -half { temp_bin += range_mod; }
+                    }
+                    num_bin = temp_bin;
+
+                    // NIE AKTUALIZUJEMY num_prec!
                 }
             }
         }
     }
 
-    
-    
-    Ok(DualValue { precise: val.precise, binary: num })
+    Ok(DualValue { precise: num_prec, binary: num_bin })
 }
 
-fn get_number_dv(v: Value) -> Result<DualValue, String> { match v { Value::Number(dv) => Ok(dv), _ => Err("Oczekiwano liczby".into()) } }
-fn get_bool(v: Value) -> Result<bool, String> { match v { Value::Bool(b) => Ok(b), _ => Err("Oczekiwano Boola".into()) } }
-fn get_index(v: Value) -> Result<i64, String> { match v { Value::Number(dv) => Ok(dv.binary as i64), _ => Err("Indeks musi być liczbą".into()) } }
+fn get_number_dv(v: Value) -> Result<DualValue, String> { 
+    match v { Value::Number(dv) => Ok(dv), _ => Err("Błąd typu: Oczekiwano liczby".into()) } 
+}
+fn get_bool(v: Value) -> Result<bool, String> { 
+    match v { Value::Bool(b) => Ok(b), _ => Err("Błąd typu: Oczekiwano Boola".into()) } 
+}
+fn get_index(v: Value) -> Result<i64, String> { 
+    match v { Value::Number(dv) => Ok(dv.binary as i64), _ => Err("Błąd typu: Indeks musi być int".into()) } 
+}
