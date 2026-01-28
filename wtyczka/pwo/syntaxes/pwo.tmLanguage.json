@@ -1,0 +1,15 @@
+{
+  "name": "PWO",
+  "scopeName": "source.pwo",
+  "patterns": [
+    { "name": "comment.line.pwo", "match": "//.*$" },
+    { "name": "storage.type.cast.pwo", "match": "\\([uif]\\d+d?\\)" },
+    { "name": "keyword.control.pwo", "match": "\\b(if|then|else|fi|while|for|from|to|down|do|end|return|include|include_once)\\b" },
+    { "name": "constant.language.boolean.pwo", "match": "\\b(True|False)\\b" },
+    { "name": "keyword.operator.assignment.pwo", "match": ":=" },
+    { "name": "entity.name.function.definition.pwo", "match": "(?<=fn\\s+)\\w+" },
+    { "name": "entity.name.function.call.pwo", "match": "\\b\\w+(?=\\s*\\()" },
+    { "name": "constant.numeric.pwo", "match": "\\b\\d+(\\.\\d+)?\\b" },
+    { "name": "string.quoted.double.pwo", "begin": "\"", "end": "\"", "patterns": [{ "name": "constant.character.escape.pwo", "match": "\\\\." }] }
+  ]
+}

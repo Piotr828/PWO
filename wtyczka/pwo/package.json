@@ -1,0 +1,24 @@
+{
+  "name": "pwo",
+  "displayName": "PWO Language",
+  "description": "Obsługa języka PWO",
+  "version": "1.0.0",
+  "engines": { "vscode": "^1.0.0" },
+  "contributes": {
+    "languages": [{
+      "id": "pwo",
+      "aliases": ["PWO", "pwo"],
+      "extensions": [".pwo"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "pwo",
+      "scopeName": "source.pwo",
+      "path": "./syntaxes/pwo.tmLanguage.json"
+    }],
+    "snippets": [{
+      "language": "pwo",
+      "path": "./snippets/pwo.json"
+    }]
+  }
+}

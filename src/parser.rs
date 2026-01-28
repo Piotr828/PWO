@@ -9,17 +9,6 @@ type ParserInput<'src> = &'src [Token];
 type ParserExtra<'src> = extra::Err<Rich<'src, Token>>;
 
 /// Główna funkcja parsująca.
-///
-/// Przekształca płaską listę tokenów w drzewo składniowe (AST) składające się z listy instrukcji.
-///
-/// # Arguments
-///
-/// * `tokens` - Wektor tokenów wygenerowany przez lekser.
-///
-/// # Returns
-///
-/// * `Ok(Vec<Stmt>)` - Lista instrukcji gotowa do interpretacji.
-/// * `Err(String)` - Sformatowany komunikat błędu (lub lista błędów) w przypadku nieprawidłowej składni.
 pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, String> {
     let input = tokens.as_slice();
 
@@ -33,23 +22,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, String> {
     })
 }
 
-
-
 /// Konstruuje parser wyrażeń (Expressions).
-///
-/// Implementuje logikę "precedence climbing" (wspinaczki po priorytetach), aby poprawnie obsługiwać
-/// kolejność wykonywania działań (np. mnożenie przed dodawaniem).
-///
-/// # Hierarchia priorytetów (od najwyższego):
-/// 1. **Atomy:** Literały, zmienne, nawiasy, wywołania funkcji, dostęp do list.
-/// 2. **Rzutowanie:** `(type) expr`.
-/// 3. **Unarne:** `-`, `!`.
-/// 4. **Potęgowanie:** `^`.
-/// 5. **Mnożenie/Dzielenie:** `*`, `/`, `%`.
-/// 6. **Dodawanie/Odejmowanie:** `+`, `-`.
-/// 7. **Porównania:** `==`, `!=`, `<`, `>`, `<=`, `>=`.
-/// 8. **Logiczne I:** `&&`.
-/// 9. **Logiczne LUB:** `||`.
 fn expr_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Expr, ParserExtra<'src>> + Clone {
     recursive(|expr| {
         //  Podstawowe wartości (liście drzewa) 
@@ -85,18 +58,24 @@ fn expr_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Expr, ParserExtra
         let atom_base = choice((
             lambda,
             list_literal,
-            val,
-            // Wyrażenie w nawiasach: (expr)
-            expr.clone().delimited_by(just(Token::LParen), just(Token::RParen)),
-            // Dostęp do listy: zmienna[indeks]
+            
+            // --- NAPRAWA TUTAJ ---
+            // ListGet musi być sprawdzone PRZED `val`.
+            // Parser najpierw próbuje dopasować `ident[expr]`.
+            // Jeśli to się nie uda (brak nawiasu), dopiero wtedy przechodzi do `val` (ident).
             ident.clone()
                 .then(expr.clone().delimited_by(just(Token::LBracket), just(Token::RBracket)))
                 .map(|(id, idx)| Expr::ListGet(id, Box::new(idx))),
+
+            // Dopiero tutaj ogólne wartości (w tym same zmienne bez nawiasów)
+            val,
+
+            // Wyrażenie w nawiasach: (expr)
+            expr.clone().delimited_by(just(Token::LParen), just(Token::RParen)),
         ));
 
         //  Wywołania funkcji 
         // Składnia: func(arg1, arg2)
-        // Zrealizowane jako `foldl`, aby obsłużyć łańcuchowe wywołania (choć rzadkie w tym języku).
         let call_args = expr.clone()
             .separated_by(just(Token::Comma))
             .allow_trailing()
@@ -110,7 +89,6 @@ fn expr_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Expr, ParserExtra
 
         //  Rzutowanie typów (Casting) 
         // Składnia: (i32) expr, (f64d) expr
-        // Token::Cast jest generowany przez lexer, gdy napotka specyficzną konstrukcję w nawiasach.
         let cast = select! {
             Token::Cast(c, s, d) => (c, s, d)
         }
@@ -175,15 +153,11 @@ fn expr_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Expr, ParserExtra
         let logical_or = logical_and.clone().then(just(Token::Or).to(Op::Or).then(logical_and).repeated().collect::<Vec<_>>())
             .map(|(first, rest)| rest.into_iter().fold(first, |l, (op, r)| Expr::Binary(Box::new(l), op, Box::new(r))));
 
-        // Używamy .boxed(), aby umożliwić rekurencję w typach parsera Chumsky
         logical_or.boxed()
     })
 }
 
 /// Konstruuje parser instrukcji (Statements).
-///
-/// Instrukcje nie zwracają wartości bezpośrednio w drzewie wyrażeń (z wyjątkiem `Expr`),
-/// ale modyfikują stan programu lub sterują przepływem.
 fn stmt_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Stmt, ParserExtra<'src>> {
     recursive(|stmt| {
         let expr = expr_parser();
@@ -200,6 +174,7 @@ fn stmt_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Stmt, ParserExtra
 
         //  Przypisania 
         // Przypisanie do elementu listy: zmienna[indeks] := wartość
+        // To jest Statement, więc musi być oddzielnie od Expr::ListGet
         let list_assignment = ident.clone()
             .then(expr.clone().delimited_by(just(Token::LBracket), just(Token::RBracket)))
             .then_ignore(just(Token::Assign))
@@ -215,7 +190,6 @@ fn stmt_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Stmt, ParserExtra
         //  Instrukcje sterujące 
         
         // IF-THEN-ELSE
-        // Zakończone słowem 'fi' lub 'end'
         let if_end = just(Token::Fi).or(just(Token::End));
         let if_stmt = just(Token::If)
             .ignore_then(expr.clone())
@@ -260,7 +234,6 @@ fn stmt_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Stmt, ParserExtra
             .map(|(((var, start), end), body)| Stmt::For { var, start, end, down: true, body: Box::new(body) });
 
         //  Definicja funkcji 
-        // fn nazwa(arg1, arg2) ... end
         let function_def = just(Token::Fn)
             .ignore_then(ident.clone())
             .then(ident.clone().separated_by(just(Token::Comma)).collect().delimited_by(just(Token::LParen), just(Token::RParen)))
@@ -272,7 +245,7 @@ fn stmt_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Stmt, ParserExtra
         choice((
             include, include_once,
             function_def,
-            list_assignment, // Musi być przed zwykłym assignment, aby parser nie zjadł identyfikatora
+            list_assignment, 
             assignment, 
             ret, 
             while_stmt, 
@@ -280,7 +253,7 @@ fn stmt_parser<'src>() -> impl Parser<'src, ParserInput<'src>, Stmt, ParserExtra
             if_stmt, 
             expr.map(Stmt::Expr)
         ))
-        .then_ignore(just(Token::Semi).or_not()) // Opcjonalny średnik na końcu każdej instrukcji
+        .then_ignore(just(Token::Semi).or_not())
         .boxed()
     })
 }

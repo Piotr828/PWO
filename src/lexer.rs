@@ -122,7 +122,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                     "Return" | "return" => Token::Return,
                     "fn" => Token::Fn,
                     "include" => Token::Include,
+                    "use" => Token::Include,
                     "include_once" => Token::IncludeOnce,
+                    "use1" => Token::IncludeOnce,
                     _ => Token::Ident(ident),
                 };
                 tokens.push(token);
