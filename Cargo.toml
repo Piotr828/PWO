@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bigdecimal = "0.4.10"
+chrono = "0.4.43"
 chumsky = "0.12.0"
 colored = "3.1.1"
 control = "1.0.0"

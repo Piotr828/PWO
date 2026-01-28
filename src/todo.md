@@ -1,3 +1,3 @@
 # TODO
-* Wtyczka
-* Funkcje wbudowane + ograniczenia
+* Debug (dokładność, kolory)
+* Ograniczenia zależne od roku

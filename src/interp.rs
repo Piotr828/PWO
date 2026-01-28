@@ -5,41 +5,62 @@ use std::fs;
 use crate::ast::{Expr, Op, Stmt, CastSpec, CastType, CastMode};
 use colored::*;
 use bigdecimal::{BigDecimal, FromPrimitive, ToPrimitive, Zero, One};
+use chrono::{Local, Datelike};
 
 // --- KONFIGURACJA ---
+
+/// Maksymalna precyzja używana przy obliczeniach na BigDecimal.
 const MAX_PRECISION: i64 = 300;
 
 // --- STRUKTURY DANYCH ---
 
+/// Wynik wykonania pojedynczej instrukcji.
+/// Służy do sterowania przepływem (np. obsługa `return`).
 #[derive(Debug)]
 pub enum ExecResult {
+    /// Przejdź do kolejnej instrukcji (opcjonalnie z wartością).
     Next(Option<Value>),
+    /// Przerwij wykonywanie funkcji i zwróć wartość.
     Return(Value),
 }
 
+/// Podwójna reprezentacja liczby.
+/// Przechowuje jednocześnie wartość precyzyjną (BigDecimal) oraz przybliżoną (f64),
+/// co pozwala na wizualizację błędów standardu IEEE-754.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DualValue {
+    /// Wartość o dowolnej precyzji (matematycznie poprawna).
     pub precise: BigDecimal,
+    /// Wartość binarna (standardowy float 64-bit).
     pub binary: f64,
 }
 
+/// Środowisko wykonawcze przechowywujące zmienne.
+/// Obsługuje zagnieżdżanie zakresów (scopes) poprzez wskaźnik `parent`.
 #[derive(Debug, PartialEq)]
 pub struct Environment {
     pub vars: HashMap<String, Value>,
     pub parent: Option<Env>,
 }
 
+/// Typ pomocniczy dla współdzielonego, mutowalnego środowiska.
 pub type Env = Rc<RefCell<Environment>>;
 
+/// Typy wartości obsługiwane przez interpreter.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    /// Liczba (z podwójną precyzją).
     Number(DualValue),
+    /// Wartość logiczna.
     Bool(bool),
+    /// Lista (współdzielona referencja do wektora wartości).
     List(Rc<RefCell<Vec<Value>>>),
+    /// Funkcja zdefiniowana przez użytkownika (argumenty, ciało, domknięcie).
     Function(Vec<String>, Box<Stmt>, Env),
 }
 
 impl Environment {
+    /// Tworzy nowe środowisko, opcjonalnie dziedziczące po rodzicu.
     pub fn new(parent: Option<Env>) -> Env {
         Rc::new(RefCell::new(Environment {
             vars: HashMap::new(),
@@ -47,6 +68,7 @@ impl Environment {
         }))
     }
 
+    /// Pobiera wartość zmiennej, przeszukując rekurencyjnie rodziców.
     pub fn get(&self, name: &str) -> Option<Value> {
         if let Some(val) = self.vars.get(name) {
             Some(val.clone())
@@ -59,6 +81,8 @@ impl Environment {
 }
 
 impl Value {
+    /// Tworzy głęboką kopię wartości.
+    /// Jest to kluczowe dla list, aby uniknąć niezamierzonego współdzielenia referencji przy przypisaniu.
     pub fn deep_clone(&self) -> Self {
         match self {
             Value::Number(n) => Value::Number(n.clone()),
@@ -72,19 +96,53 @@ impl Value {
     }
 }
 
+/// Główna struktura interpretera.
+/// Przechowuje globalne środowisko i stan dołączonych plików.
 pub struct Interpreter {
     pub global_env: Env,
     pub included_files: HashSet<String>,
 }
 
 impl Interpreter {
+    /// Inicjalizuje interpreter z domyślnym środowiskiem globalnym.
+    /// Definiuje stałe systemowe: YEAR, e, pi.
     pub fn new() -> Self {
+
+        let env = Environment::new(None);
+
+        {
+            let vars = &mut env.borrow_mut().vars;
+
+            // --- YEAR (Aktualny rok) ---
+            let now = Local::now();
+            let current_year = now.year();
+            
+            vars.insert("YEAR".to_string(), Value::Number(DualValue {
+                precise: BigDecimal::from(current_year),
+                binary: current_year as f64,
+            }));
+
+            // --- e (Liczba Eulera) ---
+            let e_val = std::f64::consts::E;
+            vars.insert("e".to_string(), Value::Number(DualValue {
+                precise: BigDecimal::from_f64(e_val).unwrap(), // unwrap jest tu bezpieczny dla stałej
+                binary: e_val,
+            }));
+
+            let pi_val = std::f64::consts::PI;
+            vars.insert("pi".to_string(), Value::Number(DualValue {
+                precise: BigDecimal::from_f64(pi_val).unwrap(),
+                binary: pi_val,
+            }));
+        }
+
         Self { 
-            global_env: Environment::new(None),
+            global_env: env,
             included_files: HashSet::new(),
         }
     }
 
+    /// Wykonuje przekazany program (listę instrukcji).
     pub fn interpret(&mut self, program: Vec<Stmt>) -> Result<Value, String> {
         let mut last_result = Value::Number(DualValue { precise: BigDecimal::zero(), binary: 0.0 });
         
@@ -102,8 +160,8 @@ impl Interpreter {
     }
 }
 
-// --- FORMATOWANIE I KOLOROWANIE ---
 
+/// Formatuje wartość do czytelnej postaci tekstowej (z kolorowaniem).
 pub fn format_value(val: Value) -> String {
     match val {
         Value::Bool(b) => if b { "True".yellow().to_string() } else { "False".yellow().to_string() },
@@ -116,6 +174,9 @@ pub fn format_value(val: Value) -> String {
     }
 }
 
+/// Zaawansowane formatowanie liczby DualValue.
+/// Porównuje wartość binarną z precyzyjną i koloruje różnice na czerwoną.
+/// Służy do wizualizacji błędów zmiennoprzecinkowych.
 pub fn format_dual(val: DualValue) -> String {
     if val.binary.is_infinite() {
         let text = if val.binary.is_sign_positive() { "inf" } else { "-inf" };
@@ -123,73 +184,89 @@ pub fn format_dual(val: DualValue) -> String {
     }
     if val.binary.is_nan() { return "NaN".red().to_string(); }
 
-    // 1. POPRAWKA DŁUGOŚCI: Usuwamy końcowe zera z wersji precyzyjnej do wyświetlania
-    let raw_p_str = val.precise.to_string();
-    let p_str = if raw_p_str.contains('.') {
-        raw_p_str.trim_end_matches('0').trim_end_matches('.').to_string()
+    // Konwersja na stringi
+    let b_raw = val.binary.to_string();
+    let b_str = if b_raw.contains('.') {
+        let t = b_raw.trim_end_matches('0').trim_end_matches('.');
+        if t.is_empty() { "0" } else { t }
     } else {
-        raw_p_str
+        &b_raw
     };
-    
-    // Generowanie stringa binarnego (bez zmian)
-    let b_str = format!("{:.15}", val.binary) // 15 cyfr wystarczy dla f64
-        .trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_string();
 
-    // Sprawdzenie części całkowitej
-    let get_int_part = |s: &str| s.split('.').next().unwrap_or("0").to_string();
-    if get_int_part(&p_str) != get_int_part(&b_str) {
+    let p_raw = val.precise.to_string();
+    let p_str = if p_raw.contains('.') {
+        let t = p_raw.trim_end_matches('0').trim_end_matches('.');
+        if t.is_empty() { "0" } else { t }
+    } else {
+        &p_raw
+    };
+
+    // ZASADA 2: Inna długość całkowita -> CAŁOŚĆ CZERWONA (znaczący błąd)
+    let get_int_len = |s: &str| s.split('.').next().unwrap_or("").len();
+    if get_int_len(b_str) != get_int_len(p_str) {
         return b_str.red().to_string();
     }
 
-    let mut result = String::new();
-    let p_chars: Vec<char> = p_str.chars().collect();
     let b_chars: Vec<char> = b_str.chars().collect();
-    let mut divergence = false;
-    let mut significant_digits = 0;
+    let p_chars: Vec<char> = p_str.chars().collect();
+    
+    // HEURYSTYKA:
+    // Czy pokazywać pełną długość (f100d), czy uciąć do f64 (2/3)?
+    // Jeśli precise jest "naturalnie" nieskończone (>250 znaków), ucinamy.
+    let is_implicit_precision = p_chars.len() > 250; 
+    
+    let display_limit = if is_implicit_precision {
+        b_chars.len()
+    } else {
+        // Dla f100d pokazujemy tyle ile ma precise
+        std::cmp::max(b_chars.len(), p_chars.len())
+    };
 
-    for (i, &c_prec) in p_chars.iter().enumerate() {
-        // Logika cyfr znaczących
-        if c_prec.is_digit(10) {
-            if significant_digits > 0 || c_prec != '0' {
-                significant_digits += 1;
-            }
-        }
+    let mut result = String::new();
+    let mut mismatch = false;
 
-        if divergence {
-            result.push_str(&c_prec.to_string().red().to_string());
+    for i in 0..display_limit {
+        let bc = if i < b_chars.len() { Some(b_chars[i]) } else { None };
+        let pc = if i < p_chars.len() { Some(p_chars[i]) } else { None };
+
+        // Jeśli binary się skończyło, wyświetlamy precise (dla f100d)
+        let char_to_print = bc.or(pc).unwrap_or('?');
+
+        if mismatch {
+            // ZASADA 1: Po wykryciu błędu reszta na czerwono
+            result.push_str(&char_to_print.to_string().red().to_string());
         } else {
-            // 2. POPRAWKA KOLORU:
-            // Jeśli string binarny się skończył, zakładamy, że wirtualnie są tam zera.
-            // Dzięki temu 0.5 (bin) == 0.5000 (prec) nie będzie błędem.
-            let c_bin = if i < b_chars.len() { 
-                b_chars[i] 
-            } else { 
-                '0' 
-            };
-
-            // Porównujemy znak z precise z (rzeczywistym lub wirtualnym) znakiem binary
-            let matches = c_bin == c_prec;
-
-            if matches {
-                // Dodatkowa estetyka: jeśli binarny się skończył, ale precyzyjny ma dalej zera,
-                // wyświetlamy je na szaro (lub normalnie), żeby pokazać, że to "tylko precyzja".
-                if i >= b_chars.len() {
-                    result.push_str(&c_prec.to_string().truecolor(100, 100, 100).to_string());
-                } else {
-                    result.push(c_prec);
-                }
-            } else {
-                // Jeśli przekroczyliśmy precyzję double (16 cyfr), to różnice są normalne
-                // i nie powinny być na czerwono (chyba że to ewidentny błąd obliczeń).
-                // W PWO++ przyjmujemy: po 16 cyfrach ufamy Precise.
-                if significant_digits > 16 {
-                    result.push_str(&c_prec.to_string().yellow().to_string()); // Ostrzegawczy żółty/pomarańczowy dla ogona
-                } else {
-                    divergence = true;
-                    result.push_str(&c_prec.to_string().red().to_string());
-                }
+            match (bc, pc) {
+                (Some(b), Some(p)) => {
+                    // Mamy obie cyfry - sprawdzamy zgodność
+                    if b != p {
+                        mismatch = true;
+                        result.push_str(&b.to_string().red().to_string());
+                    } else {
+                        // Zgodne - sprawdzamy czy to koniec widoku
+                        let is_last_visible = i == display_limit - 1;
+                        let is_truncated = p_chars.len() > display_limit;
+                        
+                        // ZASADA 3: Żółty koniec tylko jeśli ucięliśmy (w pamięci jest więcej)
+                        if is_last_visible && is_truncated {
+                            result.push_str(&b.to_string().yellow().to_string());
+                        } else {
+                            result.push(b);
+                        }
+                    }
+                },
+                (None, Some(p)) => {
+                    // Binary się skończyło, ale Precise trwa (przypadek f100d).
+                    // TO NIE JEST BŁĄD. To jest precyzja rozszerzona.
+                    // Wyświetlamy na biało (default).
+                    result.push(p);
+                },
+                (Some(b), None) => {
+                    // Binary ma cyfry, a Precise się skończyło? (Rzadkie, błąd float)
+                    mismatch = true;
+                    result.push_str(&b.to_string().red().to_string());
+                },
+                (None, None) => {}
             }
         }
     }
@@ -199,6 +276,7 @@ pub fn format_dual(val: DualValue) -> String {
 
 // --- LOGIKA WYKONAWCZA (STMT) ---
 
+/// Wykonuje pojedynczą instrukcję.
 fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<ExecResult, String> {
     match stmt {
         Stmt::Expr(expr) => { 
@@ -222,6 +300,7 @@ fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<ExecRe
                 let mut vec = vec_rc.borrow_mut();
                 let len = vec.len() as i64;
                 
+                // Obsługa ujemnych indeksów (liczenie od końca)
                 let final_idx = if raw_idx < 0 { len + raw_idx } else { raw_idx };
 
                 if final_idx < 0 {
@@ -295,6 +374,7 @@ fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<ExecRe
                     _ => DualValue { precise: BigDecimal::zero(), binary: 0.0 },
                 };
 
+                // Warunek stopu pętli
                 if *down { if curr_val.binary < e_val.binary { break; } } 
                 else { if curr_val.binary > e_val.binary { break; } }
 
@@ -304,6 +384,7 @@ fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<ExecRe
                     ExecResult::Next(v) => if v.is_some() { last = v; }
                 }
 
+                // Aktualizacja licznika pętli (inkrementacja/dekrementacja DualValue)
                 let next_p = if *down { &curr_val.precise - BigDecimal::one() } else { &curr_val.precise + BigDecimal::one() };
                 let next_b = if *down { curr_val.binary - 1.0 } else { curr_val.binary + 1.0 };
                 
@@ -318,29 +399,53 @@ fn eval_stmt(stmt: &Stmt, env: &Env, inc: &mut HashSet<String>) -> Result<ExecRe
             Ok(ExecResult::Next(None))
         }
 
-        Stmt::Include(path) | Stmt::IncludeOnce(path) => {
-            if let Stmt::IncludeOnce(_) = stmt {
-                if inc.contains(path) { return Ok(ExecResult::Next(None)); }
-                inc.insert(path.clone());
+        Stmt::Include(raw_path) | Stmt::IncludeOnce(raw_path) => {
+            // Logika wyszukiwania plików (folder std, rozszerzenia .pwo, .rs)
+            let mut path_buf = if raw_path == "std" {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src").join("std")
+            } else {
+                std::path::PathBuf::from(raw_path)
+            };
+
+            if !path_buf.exists() {
+                let try_pwo = path_buf.with_extension("pwo");
+                let try_rs = path_buf.with_extension("rs");
+                
+                if try_pwo.exists() {
+                    path_buf = try_pwo;
+                } else if try_rs.exists() {
+                    path_buf = try_rs;
+                }
             }
-            let content = fs::read_to_string(path).map_err(|e| format!("Błąd include '{}': {}", path, e))?;
+
+            let final_path = path_buf.to_string_lossy().to_string();
+
+            if let Stmt::IncludeOnce(_) = stmt {
+                if inc.contains(&final_path) { return Ok(ExecResult::Next(None)); }
+                inc.insert(final_path);
+            }
+
+            let content = fs::read_to_string(&path_buf)
+                .map_err(|e| format!("Błąd include '{}' (szukano: {:?}): {}", raw_path, path_buf, e))?;
+
+            // Parsowanie i interpretacja dołączonego pliku
             let tokens = crate::lexer::tokenize(&content)?;
             let ast = crate::parser::parse(tokens)?;
             
-            let mut last = None;
             for s in ast {
                 match eval_stmt(&s, env, inc)? {
                     ExecResult::Return(v) => return Ok(ExecResult::Return(v)),
-                    ExecResult::Next(v) => if let Some(val) = v { last = Some(val); }
+                    ExecResult::Next(_) => {}
                 }
             }
-            Ok(ExecResult::Next(last))
+            Ok(ExecResult::Next(None))
         }
     }
 }
 
 // --- LOGIKA WYRAŻEŃ (EXPR) ---
 
+/// Oblicza wartość wyrażenia.
 fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value, String> {
     match expr {
         Expr::Number(n) => {
@@ -409,6 +514,7 @@ fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value,
                 arg_values.push(eval_expr(arg_expr, env, inc)?);
             }
 
+            // Tworzenie nowego środowiska dla wywołania funkcji (domknięcie)
             let func_env = Environment::new(Some(closure_env));
 
             for (name, val) in param_names.into_iter().zip(arg_values.into_iter()) {
@@ -452,6 +558,7 @@ fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value,
                     let l = get_number_dv(l_val)?;
                     let r = get_number_dv(r_val)?;
                     
+                    // Operacje wykonywane równolegle na obu reprezentacjach (precise i binary)
                     let (res_p, res_b) = match op {
                         Op::Add => (l.precise + &r.precise, l.binary + r.binary),
                         Op::Sub => (l.precise - &r.precise, l.binary - r.binary),
@@ -507,16 +614,26 @@ fn eval_expr(expr: &Expr, env: &Env, inc: &mut HashSet<String>) -> Result<Value,
 
 // --- LOGIKA RZUTOWANIA ---
 
+/// Aplikuje rzutowanie typu na wartość DualValue.
+/// Modyfikuje `binary` lub `precise` w zależności od trybu rzutowania.
 fn apply_cast(val: DualValue, spec: &CastSpec) -> Result<DualValue, String> {
     let mut num_bin = val.binary;
-    let mut num_prec = val.precise;
+    
+    // Wczytujemy oryginał.
+    // Czy go nadpiszemy? Zależy od trybu.
+    let mut num_prec = val.precise; 
 
     match spec.mode {
         CastMode::Decimal => {
+            // TRYB DECIMAL (np. f30d):
+            // Użytkownik żąda konkretnej precyzji matematycznej.
+            // MUSIMY zmodyfikować num_prec, aby liczba "stała się" 30-cyfrowa.
             match spec.cast_type {
                 CastType::Float => {
                     let dp = spec.size as i64;
+                    // Tu zmieniamy oryginał, bo takie jest życzenie użytkownika (chce liczbę o precyzji 30)
                     num_prec = num_prec.with_scale(dp);
+                    // Binary jest tylko przybliżeniem tej nowej liczby
                     num_bin = num_prec.to_f64().unwrap_or(num_bin);
                 },
                 CastType::Int | CastType::Uint => {
@@ -530,12 +647,15 @@ fn apply_cast(val: DualValue, spec: &CastSpec) -> Result<DualValue, String> {
                     if spec.cast_type == CastType::Uint && num_prec < BigDecimal::zero() {
                         num_prec = num_prec + range;
                     }
-                    
                     num_bin = num_prec.to_f64().unwrap_or(0.0);
                 }
             }
         },
         CastMode::Bits => {
+            // TRYB BITS (np. f32, u16):
+            // Symulujemy rzutowanie sprzętowe.
+            // NIE WOLNO zmieniać num_prec (zachowujemy idealny wzorzec).
+            // Psujemy tylko num_bin.
             match spec.cast_type {
                 CastType::Float => {
                     match spec.size {
@@ -543,22 +663,23 @@ fn apply_cast(val: DualValue, spec: &CastSpec) -> Result<DualValue, String> {
                         32 => { num_bin = (num_bin as f32) as f64; },
                         16 => {
                             let mut f_bits = (num_bin as f32).to_bits();
-                            f_bits &= 0xFFFFE000; 
+                            f_bits &= 0xFFFFE000; // Maska dla f16
                             num_bin = f32::from_bits(f_bits) as f64;
                         },
                         8 => {
                             let mut f_bits = (num_bin as f32).to_bits();
-                            f_bits &= 0xFFC00000; 
+                            f_bits &= 0xFFC00000; // Maska dla f8 (symulacja)
                             num_bin = f32::from_bits(f_bits) as f64;
                         },
                         _ => return Err(format!("Bity float: f64, f32, f16, f8. Otrzymano: f{}", spec.size)),
                     }
-                    num_prec = BigDecimal::from_f64(num_bin).unwrap_or(num_prec);
                 },
                 CastType::Int | CastType::Uint => {
                     let range_f = 2f64.powf(spec.size as f64);
                     let range = BigDecimal::from_f64(range_f).unwrap_or(BigDecimal::from(1));
                     
+                    // W rzutowaniu bitowym na Int (wrap) matematyczna wartość też się zmienia (modulo),
+                    // więc tu aktualizacja num_prec jest poprawna.
                     num_prec = num_prec.with_scale(0) % &range;
                     
                     if spec.cast_type == CastType::Uint {
@@ -577,12 +698,17 @@ fn apply_cast(val: DualValue, spec: &CastSpec) -> Result<DualValue, String> {
     Ok(DualValue { precise: num_prec, binary: num_bin })
 }
 
+/// Pomocnicza funkcja wyciągająca DualValue z Value.
 fn get_number_dv(v: Value) -> Result<DualValue, String> { 
     match v { Value::Number(dv) => Ok(dv), _ => Err("Błąd typu: Oczekiwano liczby".into()) } 
 }
+
+/// Pomocnicza funkcja wyciągająca bool z Value.
 fn get_bool(v: Value) -> Result<bool, String> { 
     match v { Value::Bool(b) => Ok(b), _ => Err("Błąd typu: Oczekiwano Boola".into()) } 
 }
+
+/// Pomocnicza funkcja wyciągająca indeks listy (i64) z Value.
 fn get_index(v: Value) -> Result<i64, String> { 
     match v { 
         Value::Number(dv) => {

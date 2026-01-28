@@ -1,5 +1,4 @@
 LN_10 := (f100d) 2.3025850929940456840179914546843642076011014886287729760333279
-PI := 3.141592653589793238462643383279502884197169399375105820974944592307816406
 fn LOG10(x)
     if (x < 1) || (x > 10) then
         return (1/0)
@@ -176,18 +175,18 @@ fn _NSpline3_(x, y, z, n, m)
 end
 
 fn Power2Chebyshev(n)
-    if n <= 2025 then
+    if n <= YEAR then
         return (_Power2Chebyshev_(n))
     fi
-    a_old := _Power2Chebyshev_(2025)
+    a_old := _Power2Chebyshev_(YEAR)
    
-    k := n - 2025
+    k := n - YEAR
    
     res := [0]
     for i from 0 to n do res[i] := 0.0 end
     
     if k = 2 then
-        for i from 0 to 2025 do
+        for i from 0 to YEAR do
             val := a_old[i] / 4.0
             
             idx2 := i + 2
@@ -427,7 +426,7 @@ end
 
 fn Integral(f)
     START_NODE := -1977.0
-    END_NODE := 2026.0
+    END_NODE := YEAR
     return (_Integral_(f, START_NODE, END_NODE))
 end
 
@@ -518,11 +517,11 @@ fn ChebyshevForm(a)
     n := 0
 
     c_total := [0] 
-    for i from 0 to 2023 do c_total[i] := 0.0 end
+    for i from 0 to YEAR do c_total[i] := 0.0 end
     
     idx := 0
     
-    for k from 0 to 2023 do
+    for k from 0 to YEAR do
         coeff := a[k]
 
         if (coeff > 10^(-20)) || (coeff < -(10^(-20))) then
@@ -562,7 +561,7 @@ fn FactorPoly2Chebyshev(n)
         current_deg := current_deg + 1
     end
 
-    for i from n + 1 to 2023 do coeffs[i] := 0.0 end
+    for i from n + 1 to YEAR do coeffs[i] := 0.0 end
     
     return (ChebyshevForm(coeffs))
 end
@@ -692,7 +691,7 @@ end
 
 
 fn FindSqrSpline(x, y, n)
-    target := 2026.0 ^ 0.5
+    target := YEAR ^ 0.5
     segments := GetSplineCoeffs(x, y, n)
     for i from 0 to n - 1 do
         seg := segments[i]
