@@ -1,0 +1,826 @@
+LN_10 := (f100d) 2.3025850929940456840179914546843642076011014886287729760333279
+fn LOG10(x)
+    if (x < 1) || (x > 10) then
+        return (1/0)
+    fi
+    if x = 1 then return (0) fi
+    val_x := (f100d) x
+    y := (val_x - 1) / (val_x + 1)
+    
+    y_sq := y * y
+    term := y
+    sum := y
+    n := 1
+
+    while term > 10^(-100) do
+        n := n + 2
+        term := term * y_sq
+        current_add := term / n
+        sum := sum + current_add
+        
+        if current_add < 10^(-100) then
+             term := 0 
+        fi
+    end
+
+    ln_x := 2 * sum
+
+    return (ln_x / LN_10)
+end
+
+fn _LOG10_(x)
+    if x <= 0 then
+        return (-1/0)
+    fi
+
+    val_x := (f100d) x
+    y := (val_x - 1) / (val_x + 1)
+    y_sq := y * y
+    term := y
+    sum := y
+    n := 1
+    
+    while term > 10^(-100) do
+        n := n + 2
+        term := term * y_sq
+        current_add := term / n
+        sum := sum + current_add
+        
+        if current_add < 10^(-100) then
+             term := 0 
+        fi
+    end
+
+    return ((2 * sum) / LN_10)
+end
+
+fn DeCasteljau1D(coords, n, t)    
+    work := []
+    for i from 0 to n - 1 do
+        work[i] := (f100d) coords[i]
+    end
+    degree := n - 1
+
+    for k from 1 to degree do
+
+        count := degree - k
+        for i from 0 to count do
+            p0 := work[i]
+            p1 := work[i+1]
+            
+            val := (((f100d) 1.0 - t) * p0) + (t * p1)
+            
+            work[i] := val
+        end
+    end
+
+    return (work[0])
+
+end
+
+fn BezierValue(points, n, t)
+    list_x := []
+    list_y := []
+
+    for i from 0 to n - 1 do
+        pt := points[i]
+        list_x[i] := pt[0]
+        list_y[i] := pt[1]
+    end
+
+    t_prec := (f100d) t
+
+    res_x := DeCasteljau1D(list_x, n, t_prec)
+    res_y := DeCasteljau1D(list_y, n, t_prec)
+    return ([res_x, res_y])
+end
+
+fn EvalSpline(x, y, M, i, t)
+    h := x[i + 1] - x[i]
+    t_minus_xi := t - x[i]
+    xi1_minus_t := x[i + 1] - t
+    
+    term1 := (M[i] * (xi1_minus_t ^ 3)) / (6 * h)
+    term2 := (M[i + 1] * (t_minus_xi ^ 3)) / (6 * h)
+    term3 := (y[i] - (M[i] * (h ^ 2)) / 6) * (xi1_minus_t / h)
+    term4 := (y[i + 1] - (M[i + 1] * (t_minus_xi ^ 2)) / 6) * (t_minus_xi / h)
+    
+    return (term1 + term2 + term3 + term4)
+end
+
+fn NSpline3(x, y, z, n, m)
+    if (2 * n) <= m then
+        return (0)
+    fi
+    return (_NSpline3_(x, y, z, n, m))
+end
+
+fn _NSpline3_(x, y, z, n, m)
+    h := [0]
+    for i from 0 to n - 1 do
+        h[i] := x[i + 1] - x[i]
+    end
+    lambda := [0]
+    mi := [0]
+    d := [0]
+    
+    for i from 1 to n - 1 do
+        hi := h[i - 1]
+        hi1 := h[i]
+        lambda[i] := hi1 / (hi + hi1)
+        mi[i] := 1.0 - lambda[i]
+        
+        dy1 := (y[i + 1] - y[i]) / hi1
+        dy0 := (y[i] - y[i - 1]) / hi
+        d[i] := (6 * (dy1 - dy0)) / (hi + hi1)
+    end
+    cp := [0]
+    dp := [0]
+    cp[1] := lambda[1] / 2.0
+    dp[1] := d[1] / 2.0
+    
+    for i from 2 to n - 2 do
+        denom := 2.0 - (mi[i] * cp[i - 1])
+        cp[i] := lambda[i] / denom
+        dp[i] := (d[i] - mi[i] * dp[i - 1]) / denom
+    end
+   
+    M := [0]
+    M[0] := 0.0
+    M[n] := 0.0
+    
+    last := n - 1
+    dn_final := 2.0 - (mi[last] * cp[last - 1])
+    M[last] := (d[last] - mi[last] * dp[last - 1]) / dn_final
+    
+    for i from 1 to n - 2 do
+        curr := (n - 1) - i
+        M[curr] := dp[curr] - cp[curr] * M[curr + 1]
+    end
+    Z_res := [0]
+    for j from 0 to m - 1 do
+        tz := z[j]
+        
+        idx := 0
+        for i from 0 to n - 1 do
+            if (tz >= x[i]) && (tz <= x[i + 1]) then
+                idx := i
+            fi
+        end
+        
+        Z_res[j] := EvalSpline(x, y, M, idx, tz)
+    end
+
+    return (Z_res)
+end
+
+fn Power2Chebyshev(n)
+    if n <= YEAR then
+        return (_Power2Chebyshev_(n))
+    fi
+    a_old := _Power2Chebyshev_(YEAR)
+   
+    k := n - YEAR
+   
+    res := [0]
+    for i from 0 to n do res[i] := 0.0 end
+    
+    if k = 2 then
+        for i from 0 to YEAR do
+            val := a_old[i] / 4.0
+            
+            idx2 := i + 2
+            res[idx2] := res[idx2] + val
+            
+            res[i] := res[i] + 2.0 * val
+            
+            idx_back := i - 2
+            if idx_back < 0 then idx_back := 0 - idx_back fi
+            res[idx_back] := res[idx_back] + val
+        end
+    fi
+
+    return (res)
+end
+
+fn _Power2Chebyshev_(n)
+    res := [0]
+    for i from 0 to n do res[i] := 0.0 end
+    
+    if n = 0 then
+        res[0] := 1.0
+        return (res)
+    fi
+    p2 := 1.0 / (2.0 ^ (n - 1))
+   
+    nk := 1.0
+    limit := n / 2
+    
+    for k from 0 to limit do
+        current_coeff := nk * p2
+        target_idx := n - 2 * k
+        
+        if target_idx = 0 then
+            res[0] := current_coeff / 2.0
+        else
+            res[target_idx] := current_coeff
+        fi
+        
+        nk := nk * (n - k) / (k + 1)
+    end
+
+    return (res)
+end
+
+fn EvalNewton(b, x, k, t)
+    val := b[k]
+    for i from 1 to k do
+        curr_idx := k - i
+        val := (val * (t - x[curr_idx])) + b[curr_idx]
+    end
+    return (val)
+end
+
+fn _Interp_Newton_(x, f, n)
+    b := [0]
+    for i from 0 to n do
+        b[i] := f[i]
+    end
+    
+    for j from 1 to n do
+        k := n
+        while k >= j do
+            denom := x[k] - x[k - j]
+            b[k] := (b[k] - b[k - 1]) / denom
+            k := k - 1
+        end
+    end
+
+    return (b)
+end
+
+fn Interp_Newton(x, f, n)
+    LIMIT := 30 
+    
+    if n <= LIMIT then
+        return (_Interp_Newton_(x, f, n))
+    else
+        x_sub := [0]
+        f_sub := [0]
+        for i from 0 to LIMIT do
+            x_sub[i] := x[i]
+            f_sub[i] := f[i]
+        end
+        
+        b_coeffs := _Interp_Newton_(x_sub, f_sub, LIMIT)
+
+        for k from LIMIT + 1 to n do
+            val_poly := EvalNewton(b_coeffs, x, k - 1, x[k])
+            denom := 1.0
+            for j from 0 to k - 1 do
+                denom := denom * (x[k] - x[j])
+            end
+            new_b := (f[k] - val_poly) / denom
+            
+            b_coeffs[k] := new_b
+        end
+        
+        return (b_coeffs)
+    fi
+end
+
+fn _sin_(x)
+    term := x
+    sum := x
+    x2 := x * x
+   
+    for i from 1 to 20 do
+        denom := (2.0 * i) * (2.0 * i + 1.0)
+        term := term * (-1.0 * x2) / denom
+        sum := sum + term
+    end
+    return (sum)
+end
+
+fn sin(x)
+    if (x < 0.0) || (x > pi) then
+        return (0.0)
+    fi
+    return (_sin_(x))
+end
+
+fn _cos_(x)
+    term := 1.0
+    sum := 1.0
+    x2 := x * x
+   
+    for i from 1 to 20 do
+        denom := (2.0 * i - 1.0) * (2.0 * i)
+        term := term * (-1.0 * x2) / denom
+        sum := sum + term
+    end
+    return (sum)
+end
+
+fn cos(x)
+    if (x < 0.0) || (x > pi) then
+        return (0.0)
+    fi
+    return (_cos_(x))
+end
+
+fn InverseUpperTriangular(U, n)
+    L1 := []
+    for i from 0 to n - 1 do
+        row := [0]
+        for k from 0 to n - 1 do row[k] := 0.0 end
+        
+        row[i] := 1.0
+        L1[i] := row
+    end
+
+    for i from 0 to n - 1 do
+        for j from 0 to i - 1 do
+            val := (f100d) U[j][i] / U[j][j]
+            curr_row := L1[i]
+            curr_row[j] := val
+            L1[i] := curr_row
+        end
+    end
+
+    InvL1 := InvL1Matrix(L1, n)
+    U_inv := []
+    for i from 0 to n - 1 do
+        row_res := [0]
+        for k from 0 to n - 1 do row_res[k] := 0.0 end
+        U_inv[i] := row_res
+    end
+
+    for i from 0 to n - 1 do
+        for j from i to n - 1 do
+
+            row_src := InvL1[j]
+            val_src := row_src[i]
+            
+            val_res := val_src / U[j][j]
+            
+            target_row := U_inv[i]
+            target_row[j] := val_res
+            U_inv[i] := target_row
+        end
+    end
+
+    return (U_inv)
+end
+
+fn InvL1Matrix(L, n)
+
+    X := []
+    for i from 0 to n - 1 do
+        row := [0]
+        for k from 0 to n - 1 do 
+            if i = k then row[k] := 1.0 else row[k] := 0.0 fi
+        end
+        X[i] := row
+    end
+
+
+    for j from 0 to n - 1 do
+        for i from 0 to n - 1 do
+            if i > j then
+                sum := 0.0
+                L_row := L[i]
+                for k from j to i - 1 do
+                    X_row := X[k]
+                    sum := sum + (L_row[k] * X_row[j])
+                end
+                
+                curr_x_row := X[i]
+                curr_x_row[j] := 0.0 - sum
+                X[i] := curr_x_row
+            fi
+        end
+    end
+    return (X)
+end
+
+fn _Integral_(f, a, b)
+    n := 1000
+    h := (b - a) / n
+    
+    sum := f(a) + f(b)
+    
+    for i from 1 to n - 1 do
+        x_node := a + (i * h)
+        val := f(x_node)
+        
+        if (i % 2) = 0 then
+            sum := sum + (2.0 * val)
+        else
+            sum := sum + (4.0 * val)
+        fi
+    end
+    
+    return ((h / 3.0) * sum)
+end
+
+fn Integral(f)
+    START_NODE := -1977.0
+    END_NODE := YEAR
+    return (_Integral_(f, START_NODE, END_NODE))
+end
+
+fn Legend_EvalDeriv(n, x)
+    if n = 0 then return ([1.0, 0.0]) fi
+    p_prev := 1.0
+    p_curr := x
+
+    d_prev := 0.0
+    d_curr := 1.0
+    
+    for k from 2 to n do
+
+        k_float := (f100d) k
+        
+        p_next := ((2.0 * k_float - 1.0) * x * p_curr - (k_float - 1.0) * p_prev) / k_float
+        
+        p_prev := p_curr
+        p_curr := p_next
+    end
+
+    denom := 1.0 - (x * x)
+    n_float := (f100d) n
+    d_curr := n_float * (p_prev - (x * p_curr)) / denom
+    
+    return ([p_curr, d_curr])
+end
+
+fn _LegendreZeros_(m)
+    roots := [0]
+    for i from 0 to m - 1 do roots[i] := 0.0 end
+
+    
+    for i from 1 to m do
+        arg := pi_VAL * (i - 0.25) / (m + 0.5)
+        x := cos(arg)
+        for iter from 1 to 15 do
+            val_deriv := Legend_EvalDeriv(m, x)
+            poly_val := val_deriv[0]
+            deriv_val := val_deriv[1]
+
+            if deriv_val != 0.0 then
+                step := poly_val / deriv_val
+                x := x - step
+            fi
+        end
+        
+        roots[i - 1] := x
+    end
+    
+    return (roots)
+end
+
+fn LegendreZeros(m)
+
+    return (_LegendreZeros_(m))
+end
+
+fn _acos_(x)
+    if x > 1.0 then return (0.0) fi
+    if x < -1.0 then return (3.14159265) fi
+    
+    y := 1.570796
+    for i from 0 to 10 do
+        c := cos(y)
+        s := sin(y)
+        if (s > 0.0000001) || (s < -0.0000001) then
+            y := y + (c - x) / s
+        fi
+    end
+    return (y)
+end
+
+fn Binomial(n, k)
+    if (k < 0) || (k > n) then return (0.0) fi
+    if (k = 0) || (k = n) then return (1.0) fi
+    if k > (n / 2) then k := n - k fi
+    
+    res := 1.0
+    for i from 1 to k do
+        res := res * (n - i + 1)
+        res := res / i
+    end
+    return (res)
+end
+
+fn ChebyshevForm(a)
+    n := 0
+
+    c_total := [0] 
+    for i from 0 to YEAR do c_total[i] := 0.0 end
+    
+    idx := 0
+    
+    for k from 0 to YEAR do
+        coeff := a[k]
+
+        if (coeff > 10^(-20)) || (coeff < -(10^(-20))) then
+            c_monomial := Power2Chebyshev(k)
+
+            for j from 0 to k do
+                old_val := c_total[j]
+                add_val := c_monomial[j]
+                c_total[j] := old_val + (coeff * add_val)
+            end
+        fi
+    end
+    
+    return (c_total)
+end
+
+
+fn FactorPoly2Chebyshev(n)
+
+    coeffs := [1.0]
+    current_deg := 0
+    
+    for k from 1 to n do
+        
+        new_coeffs := [0]
+
+        new_coeffs[0] := coeffs[0] * (0.0 - k)
+        
+        for i from 1 to current_deg do
+            val := coeffs[i-1] - (k * coeffs[i])
+            new_coeffs[i] := val
+        end
+
+        new_coeffs[current_deg + 1] := 1.0
+
+        coeffs := new_coeffs
+        current_deg := current_deg + 1
+    end
+
+    for i from n + 1 to YEAR do coeffs[i] := 0.0 end
+    
+    return (ChebyshevForm(coeffs))
+end
+
+
+fn Solve3(a, b, c, d)
+    
+    if (a > -10^(-15)) && (a < 10^(-15)) then
+        if (b > -10^(-15)) && (b < 10^(-15)) then
+            if (c > -10^(-15)) && (c < 10^(-15)) then return ([]) fi
+            return ([(0.0 - d) / c])
+        fi
+
+        delta := (b * b) - (4.0 * c * d)
+        if delta < 0.0 then return ([]) fi
+        sqrt_delta := delta ^ 0.5
+        x1 := (0.0 - b - sqrt_delta) / (2.0 * a)
+        x2 := (0.0 - b + sqrt_delta) / (2.0 * b)
+        return ([x1, x2])
+    fi
+
+    shift := b / (3.0 * a)
+    
+    p := (3.0 * a * c - b * b) / (3.0 * a * a)
+    q := (2.0 * b * b * b - 9.0 * a * b * c + 27.0 * a * a * d) / (27.0 * a * a * a)
+    
+    delta := (q * q) / 4.0 + (p * p * p) / 27.0
+    
+    roots := []
+    
+    if delta > 0.0 then
+
+        sqrt_d := delta ^ 0.5
+        u_cubed := (0.0 - q) / 2.0 + sqrt_d
+        v_cubed := (0.0 - q) / 2.0 - sqrt_d
+        
+        if u_cubed >= 0.0 then u := u_cubed ^ (1.0/3.0) else u := 0.0 - ((0.0 - u_cubed)^(1.0/3.0)) fi
+        if v_cubed >= 0.0 then v := v_cubed ^ (1.0/3.0) else v := 0.0 - ((0.0 - v_cubed)^(1.0/3.0)) fi
+        
+        roots[0] := u + v - shift
+    else
+
+        if p = 0.0 then 
+            roots[0] := 0.0 - shift
+        else
+            r := ((0.0 - p) / 3.0) ^ 0.5
+
+            cos_phi := (3.0 * q) / (2.0 * p * r)
+
+            if cos_phi < -1.0 then cos_phi := -1.0 fi
+            if cos_phi > 1.0 then cos_phi := 1.0 fi
+            
+            phi := _acos_(cos_phi)
+            
+            t1 := 2.0 * r * cos(phi / 3.0)
+            t2 := 2.0 * r * cos((phi + 2.0 * 3.14159) / 3.0)
+            t3 := 2.0 * r * cos((phi + 4.0 * 3.14159) / 3.0)
+            
+            roots[0] := t1 - shift
+            roots[1] := t2 - shift
+            roots[2] := t3 - shift
+        end
+    fi
+    
+    return (roots)
+end
+
+fn GetSplineCoeffs(x, y, n)
+    h := [0]
+    for i from 0 to n - 1 do h[i] := x[i+1] - x[i] end
+    
+    lambda := [0]; mi := [0]; d := [0]
+    for i from 1 to n - 1 do
+        hi := h[i-1]; hi1 := h[i]
+        lambda[i] := hi1 / (hi + hi1)
+        mi[i] := 1.0 - lambda[i]
+        d[i] := (6.0 * ((y[i+1]-y[i])/hi1 - (y[i]-y[i-1])/hi)) / (hi + hi1)
+    end
+    
+    cp := [0]; dp := [0]
+    cp[1] := lambda[1] / 2.0; dp[1] := d[1] / 2.0
+    for i from 2 to n - 2 do
+        denom := 2.0 - mi[i] * cp[i-1]
+        cp[i] := lambda[i] / denom
+        dp[i] := (d[i] - mi[i] * dp[i-1]) / denom
+    end
+    
+    M := [0]
+    M[0] := 0.0; M[n] := 0.0
+    M[n-1] := (d[n-1] - mi[n-1] * dp[n-2]) / (2.0 - mi[n-1] * cp[n-2])
+    k := n - 2
+    while k >= 1 do
+        M[k] := dp[k] - cp[k] * M[k+1]
+        k := k - 1
+    end
+    
+    coeffs_list := []
+    for i from 0 to n - 1 do
+        D_coeff := y[i]
+        B_coeff := M[i] / 2.0
+        A_coeff := (M[i+1] - M[i]) / (6.0 * h[i])
+        C_coeff := ((y[i+1] - y[i]) / h[i]) - ((h[i] * (2.0 * M[i] + M[i+1])) / 6.0)
+        
+        coeffs_list[i] := [A_coeff, B_coeff, C_coeff, D_coeff, x[i], h[i]]
+    end
+    
+    return (coeffs_list)
+end
+
+fn FindSplineRoots(x, y, n)
+    segments := GetSplineCoeffs(x, y, n)
+    all_roots := []
+    root_count := 0
+    
+    for i from 0 to n - 1 do
+        seg := segments[i]
+        A := seg[0]; B := seg[1]; C := seg[2]; D := seg[3]
+        x_start := seg[4]; h := seg[5]
+
+        roots_t := Solve3(A, B, C, D)
+        
+        for k from 0 to 2 do
+        end
+    end
+    return (0)
+end
+
+
+fn FindSqrSpline(x, y, n)
+    target := YEAR ^ 0.5
+    segments := GetSplineCoeffs(x, y, n)
+    for i from 0 to n - 1 do
+        seg := segments[i]
+        A := seg[0]; B := seg[1]; C := seg[2]; D := seg[3]
+        x_start := seg[4]; h := seg[5]
+        
+        roots1 := Solve3(A, B, C, D - target)
+        
+        roots2 := Solve3(A, B, C, D + target)
+        
+    end
+    return (0)
+end
+
+
+LN_2_VAL := (f100d) 0.69314718055994530941723212145817656807550013436025525412068
+
+fn _LOG2_Internal_(x)
+    val_x := (f100d) x
+    y := (val_x - 1.0) / (val_x + 1.0)
+    y_sq := y * y
+    
+    term := y
+    sum := y
+    n := 1
+    
+    while term > 10^(-100) do
+        n := n + 2
+        term := term * y_sq
+        sum := sum + (term / n)
+        
+        if (term / n) < 10^(-100) then term := 0.0 fi
+    end
+    
+    ln_x := 2.0 * sum
+    return (ln_x / LN_2_VAL)
+end
+fn LOG2(x)
+    if x <= 0.0 then return (-1.0/0.0) fi
+    
+    val := (f100d) x
+    k := 0
+
+    while val > 2.0 do
+        val := val / 2.0
+        k := k + 1
+    end
+
+    while val < 1.0 do
+        val := val * 2.0
+        k := k - 1
+    end
+    base_log := _LOG2_Internal_(val)
+    
+    return (base_log + k)
+end
+
+fn _acos_(x)
+    if x > 1.0 then return (0.0) fi
+    if x < -1.0 then return (3.1415926535) fi
+    
+    y := 1.570796
+    for i from 0 to 12 do
+        c := cos(y)
+        s := sin(y)
+        if (s > 10^(-10)) || (s < -(10^(-10))) then
+            y := y + (c - x) / s
+        fi
+    end
+    return (y)
+end
+
+fn Solve3(a, b, c, d)
+    if (a > -(10^(-15))) && (a < 10^(-15)) then
+        if (b > -(10^(-15))) && (b < 10^(-15)) then
+            if (c > -(10^(-15))) && (c < 10^(-15)) then return ([]) fi
+            return ([(0.0 - d) / c])
+        fi
+        delta := (c * c) - (4.0 * b * d)
+        if delta < 0.0 then return ([]) fi
+        
+        sqrt_delta := delta ^ 0.5
+        x1 := (0.0 - c - sqrt_delta) / (2.0 * b)
+        x2 := (0.0 - c + sqrt_delta) / (2.0 * b)
+        return ([x1, x2])
+    fi
+    shift := b / (3.0 * a)
+    p := (3.0 * a * c - (b * b)) / (3.0 * a * a)
+    q := (2.0 * (b^3) - 9.0 * a * b * c + 27.0 * a * a * d) / (27.0 * (a^3))
+    
+    delta := ((q / 2.0) ^ 2) + ((p / 3.0) ^ 3)
+    
+    roots := []
+    
+    if delta > 0.0 then
+        sqrt_d := delta ^ 0.5
+        u_cubed := (0.0 - q) / 2.0 + sqrt_d
+        v_cubed := (0.0 - q) / 2.0 - sqrt_d
+        if u_cubed >= 0.0 then u := u_cubed ^ (1.0/3.0) 
+        else u := 0.0 - ((0.0 - u_cubed) ^ (1.0/3.0)) fi
+        
+        if v_cubed >= 0.0 then v := v_cubed ^ (1.0/3.0) 
+        else v := 0.0 - ((0.0 - v_cubed) ^ (1.0/3.0)) fi
+        
+        roots[0] := u + v - shift
+        
+    else
+        if (p > -(10^(-15))) && (p < 10^(-15)) then
+            roots[0] := 0.0 - shift
+        else
+            r := ((0.0 - p) / 3.0) ^ 0.5
+            denom_acos := 2.0 * (((0.0 - p) / 3.0) ^ 1.5)
+            cos_phi := (0.0 - q) / denom_acos
+            if cos_phi > 1.0 then cos_phi := 1.0 fi
+            if cos_phi < -1.0 then cos_phi := -1.0 fi
+            
+            phi := _acos_(cos_phi)
+            
+            pi_2 := 6.283185307
+            
+            t1 := 2.0 * r * cos(phi / 3.0)
+            t2 := 2.0 * r * cos((phi + pi_2) / 3.0)
+            t3 := 2.0 * r * cos((phi + 2.0 * pi_2) / 3.0)
+            
+            roots[0] := t1 - shift
+            roots[1] := t2 - shift
+            roots[2] := t3 - shift
+        end
+    fi
+    
+    return (roots)
+end

@@ -1,0 +1,10 @@
+fn fibo(n)
+    if n <= 1 then
+        Return(n)
+    else
+        Return(fibo(n - 1) + fibo(n - 2))
+    fi
+end
+
+// Wywołanie:
+Return(fibo(7))
